@@ -15,21 +15,20 @@ def load_and_normalize_image(directory_path, extensions=['.jpg', '.jpeg', '.png'
     return normalize_image(image_paths)
 
 
-def normalize_image(image_path):
+def normalize_image(image_path, size=256):
+
     if isinstance(image_path, str):
         image_path = [image_path]
 
     images = []
 
     for path in image_path:
-        image = Image.open(path)
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
-        img_array = np.array(image)
-        normalized_image = img_array.astype(np.float32) / 255.0
-        images.append(normalized_image)
+        image = Image.open(path).convert('RGB').resize((size, size))
+        img_array = np.array(image, dtype=np.float32) / 255.0
+        img_array = np.transpose(img_array, (2, 0, 1))
+        images.append(img_array)
 
-    return np.array(images)
+    return np.stack(images)
 
 
 def conv_block(in_channels, out_channels, dropout=0.1):
@@ -101,18 +100,22 @@ class UNet(nn.Module):
         b = self.bottleneck(e3)  # Size: H/8 x W/8
 
         # Decoder - use skip connections
-        d1 = self.up1(b)  # Upsample
-        d1 = torch.cat([d1, e3], dim=1)  # Skip connection!
+        d1 = self.up1(b)
+        d1 = torch.nn.functional.interpolate(d1, size=e3.shape[2:])
+        d1 = torch.cat([d1, e3], dim=1)
 
-        d2 = self.up2(d1)  # Upsample
-        d2 = torch.cat([d2, e2], dim=1)  # Skip connection!
+        d2 = self.up2(d1)
+        d2 = torch.nn.functional.interpolate(d2, size=e2.shape[2:])
+        d2 = torch.cat([d2, e2], dim=1)
 
-        d3 = self.up3(d2)  # Upsample
-        d3 = torch.cat([d3, e1], dim=1)  # Skip connection!
+        d3 = self.up3(d2)
+        d3 = torch.nn.functional.interpolate(d3, size=e1.shape[2:])
+        d3 = torch.cat([d3, e1], dim=1)
 
         # Final output
         out = self.final(d3)
         return out
+
 
 
 model = UNet(in_channels=3, out_channels=3)
@@ -121,9 +124,36 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
 model = UNet(in_channels=3, out_channels=3, dropout=0.1)
-model = model.to(device)
+model = model.to(device) # IF found clashes write model = Unet(...).to(device)
 
 z = torch.randn(1, 3, 256, 256).to(device)
 
 print(f"Model has {sum(p.numel() for p in model.parameters())} parameters")
 
+criterion = nn.MSELoss() #Amplifies the differences between the predicted and actual output
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001) #Adam optimizer - (Adapt based on gradients)
+
+target_img = load_and_normalize_image('/Users/knightnm/PythonProject/AIE/images')
+target_tensor = torch.from_numpy(target_img).to(device)
+print(target_img.shape)
+
+
+num_iterations = 3000 #Deep image prior iterations
+
+for i in range(num_iterations):
+    # Forward pass: noise -> network -> output
+    output = model(z)
+
+    # Calculate loss
+    loss = criterion(output, target_tensor)
+
+    # Backward pass: calculate gradients
+    optimizer.zero_grad()
+    loss.backward()
+
+    # Update parameters
+    optimizer.step()
+
+    # Print progress
+    if i % 100 == 0:
+        print(f"Iteration {i}, Loss: {loss.item():.6f}")
