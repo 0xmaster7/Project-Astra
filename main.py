@@ -3,6 +3,8 @@ import os
 from PIL import Image
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
 
 def load_and_normalize_image(directory_path, extensions=['.jpg', '.jpeg', '.png', '.bmp']):
     image_paths = []
@@ -37,7 +39,8 @@ def conv_block(in_channels, out_channels, dropout=0.1):
         nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
         nn.BatchNorm2d(out_channels),
         nn.ReLU(inplace=True),
-        nn.Dropout2d(p=dropout) #added dropout, ie turn off neurons
+        #nn.Dropout2d(p=dropout) #added dropout, ie turn off neurons
+        nn.Identity()
     )
 
 def down_block(in_channels, out_channels, dropout=0.1):
@@ -85,9 +88,10 @@ class UNet(nn.Module):
         self.up1 = up_block(512, 256)  # 512 -> 256
         self.up2 = up_block(512, 128)  # 512 -> 128 (512 because of skip!)
         self.up3 = up_block(256, 64)  # 256 -> 64
+        self.up4 = up_block(128, 64)
 
         # Final output layer
-        self.final = nn.Conv2d(128, out_channels, kernel_size=1)  # 128 -> 3 (RGB)
+        self.final = nn.Conv2d(64, out_channels, kernel_size=1)  # 128 -> 3 (RGB)
 
 
     def forward(self, x):
@@ -112,9 +116,12 @@ class UNet(nn.Module):
         d3 = torch.nn.functional.interpolate(d3, size=e1.shape[2:])
         d3 = torch.cat([d3, e1], dim=1)
 
-        # Final output
-        out = self.final(d3)
+        d4 = self.up4(d3)
+
+        out = self.final(d4)
+
         return out
+
 
 
 
@@ -157,3 +164,10 @@ for i in range(num_iterations):
     # Print progress
     if i % 100 == 0:
         print(f"Iteration {i}, Loss: {loss.item():.6f}")
+
+
+with torch.no_grad():
+    out = model(z).clamp(0,1)
+
+out_np = out.squeeze(0).permute(1,2,0).cpu().numpy()
+Image.fromarray((out_np*255).astype(np.uint8)).save("result.png")
