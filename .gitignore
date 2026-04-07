@@ -1,0 +1,22 @@
+# Virtual environments
+dip/
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Matplotlib/cache
+.mplconfig/
+
+# Generated outputs
+outputs/
+outputs_debug/
+outputs_test/
+web_runs/
+
+# IDE / OS
+.idea/
+.DS_Store
